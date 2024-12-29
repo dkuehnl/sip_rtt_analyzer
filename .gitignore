@@ -1,3 +1,6 @@
+#Custom files
+.vscode
+
 # Prerequisites
 *.d
 
