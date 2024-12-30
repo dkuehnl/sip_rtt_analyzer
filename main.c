@@ -20,7 +20,15 @@ void evaluate_total_rtt(measurement_t *measurement, char *min, char *max, char *
 }
 
 void validate_sip_answer(measurement_t *measurement, char *buffer) {
-
+    char *status_line_start = strstr(buffer, "SIP/2.0"); 
+    char *status_line_end = strstr(buffer, "\r\n"); 
+    if (status_line_start && status_line_end) {
+        snprintf(measurement->sip_response, sizeof(measurement->sip_response), 
+        "%.*s", (int)(status_line_end - (status_line_start + 8)), status_line_start + 8);
+    } else {
+        fprintf(stderr, "No valid status-line detected in response.\n"); 
+        snprintf(measurement->sip_response, sizeof(measurement->sip_response), "invalid response"); 
+    }
 }
 
 void calculate_delay(measurement_t *measurement){
@@ -53,7 +61,7 @@ char *get_printable_timestamp(struct timeval tv){
     timeinfo = localtime(&tv.tv_sec);
 
     strftime(timeString, sizeof(timeString), "%d-%m-%Y %H:%M:%S", timeinfo);
-    snprintf(msec_buffer, sizeof(msec_buffer), ".%03ld", tv.tv_usec / 1000);
+    snprintf(msec_buffer, sizeof(msec_buffer), ".%06ld", tv.tv_usec);
     strcat(timeString, msec_buffer);
 
     return timeString;
@@ -67,14 +75,12 @@ int get_options_request(char *buffer, const char *proxy, measurement_t *measurem
     "Max-Forwards: 70\r\n"
     "From: <sip:%s>;tag=djaiefkla348afikju3u9dkhjk3\r\n"
     "To: <sip:%s>\r\n"
-    "Call-ID: jfköajbsödkivha@192.168.178.62\r\n"
+    "Call-ID: jfklajbspdkivha@192.168.178.62\r\n"
     "CSeq: 10%d OPTIONS\r\n"
     "Contact: <sip:+4919952000234234@192.168.178.62:5060;transport=tcp>\r\n"
     "User-Agent: SIP RTT-Tester by dkuehnlein\r\n"
     "X-Timestamp: %s\r\n"
-    "Allow: INVITE, ACK, CANCEL, OPTIONS, BYE\r\n"
-    "Content-Length: 0\r\n"
-    "\r\n",
+    "Content-Length: 0\r\n\r\n",
     proxy, proxy, proxy, measurement->request_number, get_printable_timestamp(measurement->starttime)
     );
 
@@ -152,7 +158,7 @@ int main(int argc, char *argv[]) {
     int                 sockfd; 
     struct sockaddr_in  sockaddr;
     char                buffer[1024];
-/*
+
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
         fprintf(stderr, "Socketcreation failed.\n"); 
@@ -168,7 +174,8 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Connect to remote-destination failed.\n"); 
         close(sockfd); 
         exit(EXIT_FAILURE);
-    }*/
+    }
+
     printf("Start measurement (%d request will be send)\n", sender_count);
     for (int i = 0; i < sender_count; i++) {
         memset(&buffer, 0x00, sizeof(buffer)); 
@@ -178,17 +185,18 @@ int main(int argc, char *argv[]) {
         if (get_options_request(buffer, destination_ip, &measurement[i]) != 0) {
             fprintf(stderr, "Error while creating OPTIONS-Request occured.\n"); 
             snprintf(measurement[i].sip_response, sizeof(measurement[i].sip_response), "Error");
-            //shutdown(sockfd, SHUT_RDWR);
-            //close(sockfd); 
+            shutdown(sockfd, SHUT_RDWR);
+            close(sockfd); 
             exit(EXIT_FAILURE);
         }
 
-        /*write(sockfd, buffer, strlen(buffer)); 
+        write(sockfd, buffer, strlen(buffer)); 
         memset(&buffer, 0x00, sizeof(buffer)); 
         read(sockfd, buffer, sizeof(buffer));
         gettimeofday(&measurement[i].endtime, NULL);
         validate_sip_answer(&measurement[i], buffer); 
-        calculate_delay(&measurement[i]); */
+        calculate_delay(&measurement[i]); 
+        usleep(500000);
     }
 
     char min[64]; 
@@ -196,13 +204,45 @@ int main(int argc, char *argv[]) {
     char avg[64];
     evaluate_total_rtt(measurement, min, max, avg); 
 
-    if (send_summary == 1) {
-        //Baue SIP-OPTION mit X-Headern 
-        //Begrenzung einbauen (<20 X-Header)
-        //Struktur X-Header: Paket 1 // Send: HH:MM:SS.mmm // Recv: HH:MM:SS.mmm // Delay: SS.mmm
-        //Letzter X-Header: Min-Delay: SS.mmm // Max-Delay: SS.mmm // Average Delay: SS.mmm
+    if (send_summary == 1 && sender_count < 20) {
+        char summary_message[3096];
+        char x_header[2048];
+
+        for (int i = 0; i < sender_count; i++) {
+            char sum_buffer[512];
+            snprintf(sum_buffer, sizeof(sum_buffer), 
+            "X-Sum: Pkt %d / Send: %s / Recv: %s / Delay: %s / Resp: %s\r\n", 
+            measurement[i].request_number, 
+            "unavail", //measurement[i].starttime, 
+            "unavail", //measurement[i].endtime, 
+            "unavail", //measurement[i].delay, 
+            measurement[i].sip_response);
+
+            strncat(x_header, sum_buffer, sizeof(x_header)-strlen(x_header));
+        }
+
+        printf("Len x-header: %ld\n", strlen(x_header));
+        snprintf(summary_message, sizeof(summary_message), 
+        "OPTIONS sip:%s SIP/2.0\r\n"
+        "Via: SIP/2.0/TCP 192.168.178.62:5060;branch=z9hG4bK776asdhds\r\n"
+        "Max-Forwards: 70\r\n"
+        "From: <sip:%s>;tag=djaiefkla348afikju3u9dkhjk3\r\n"
+        "To: <sip:%s>\r\n"
+        "Call-ID: jfklajbspdkivha@192.168.178.62\r\n"
+        "CSeq: 200 OPTIONS\r\n"
+        "Contact: <sip:+4919952000234234@192.168.178.62:5060;transport=tcp>\r\n"
+        "User-Agent: SIP RTT-Tester by dkuehnlein\r\n"
+        "%s"
+        "Content-Length: 0\r\n\r\n",
+        destination_ip, destination_ip, destination_ip, x_header);
+        
+        printf("%s", summary_message);
+        printf("Len Sum-Message: %ld\n", strlen(summary_message));
     }
+
+    
     printf("\nSummary:\n"); 
+    /*"X-Total: Min-Delay: %s / Max-Delay: %s / Avg-Delay: %s\r\n"
     printf("Tested Proxy: %s\tPakets send: %d\n", destination_ip, sender_count);
     for (int i = 0; i < sender_count; i++) {
         printf("Paket-Nr: %d\tSend: %s\tRecv: %s\tDelay: %s\tAnswer: %s\n", 
@@ -213,7 +253,7 @@ int main(int argc, char *argv[]) {
         measurement[i].sip_response);
     }
     printf("===============================================================\n");
-    printf("Min-Delay: %s\tMax-Delay: %s\tAverage: %s\n", min, max, avg);
+    printf("Min-Delay: %s\tMax-Delay: %s\tAverage: %s\n", min, max, avg);*/
 
     return 0; 
 }

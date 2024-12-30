@@ -1,6 +1,7 @@
 #Custom files
 .vscode
 build
+response_analyser.c
 
 # Prerequisites
 *.d
