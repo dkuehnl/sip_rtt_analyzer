@@ -178,17 +178,17 @@ int main(int argc, char *argv[]) {
         if (get_options_request(buffer, destination_ip, &measurement[i]) != 0) {
             fprintf(stderr, "Error while creating OPTIONS-Request occured.\n"); 
             snprintf(measurement[i].sip_response, sizeof(measurement[i].sip_response), "Error");
-            shutdown(sockfd, SHUT_RDWR);
-            close(sockfd); 
+            //shutdown(sockfd, SHUT_RDWR);
+            //close(sockfd); 
             exit(EXIT_FAILURE);
         }
 
-        write(sockfd, buffer, strlen(buffer)); 
+        /*write(sockfd, buffer, strlen(buffer)); 
         memset(&buffer, 0x00, sizeof(buffer)); 
         read(sockfd, buffer, sizeof(buffer));
         gettimeofday(&measurement[i].endtime, NULL);
         validate_sip_answer(&measurement[i], buffer); 
-        calculate_delay(&measurement[i]); 
+        calculate_delay(&measurement[i]); */
     }
 
     char min[64]; 
