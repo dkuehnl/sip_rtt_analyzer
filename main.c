@@ -9,8 +9,8 @@
 
 typedef struct {
     int request_number;
-    struct timeval sendtime;
-    struct timeval recvtime;
+    struct timespec sendtime;
+    struct timespec recvtime;
     char delay[64];
     char sip_response[248]
 } measurement_t;
@@ -32,6 +32,14 @@ void validate_sip_answer(measurement_t *measurement, char *buffer) {
 }
 
 void calculate_delay(measurement_t *measurement){
+    long seconds = measurement->recvtime.tv_sec - measurement->sendtime.tv_sec;
+    long nanosec = measurement->recvtime.tv_nsec - measurement->sendtime.tv_nsec;
+
+    if (nanosec < 0) {
+        seconds -= 1; 
+        nanosec += 1000000000;
+    }
+    snprintf(measurement->delay, sizeof(measurement->delay), "%ld.%06ld", seconds, nanosec/1000);
 
 }
 
@@ -54,18 +62,18 @@ void print_progress_bar(int current, int total) {
     fflush(stdout); 
 }
 
-void get_printable_timestamp(struct timeval tv, char *buffer, const int format_long, size_t buffersize) {
+void get_printable_timestamp(struct timespec ts, char *buffer, const int format_long, size_t buffersize) {
     struct tm *timeinfo;
-    char msec_buffer[8];
-    timeinfo = localtime(&tv.tv_sec);
+    char msec_buffer[64];
+    timeinfo = localtime(&ts.tv_sec);
 
     if (format_long == 1) {
         strftime(buffer, buffersize, "%d-%m-%Y %H:%M:%S", timeinfo);
-        snprintf(msec_buffer, sizeof(msec_buffer), ".%06ld", tv.tv_usec);
+        snprintf(msec_buffer, sizeof(msec_buffer), ".%06ld", ts.tv_nsec/1000);
         strncat(buffer, msec_buffer, buffersize-strlen(buffer)-1);
     } else if (format_long == 0) {
         strftime(buffer, buffersize, "%H:%M:%S", timeinfo);
-        snprintf(msec_buffer, sizeof(msec_buffer), ".%06ld", tv.tv_usec);
+        snprintf(msec_buffer, sizeof(msec_buffer), ".%06ld", ts.tv_nsec/1000);
         strncat(buffer, msec_buffer, sizeof(buffer)-strlen(buffer)-1);
     } else {
         fprintf(stderr, "Unrecognized format-option.\n");
@@ -74,7 +82,7 @@ void get_printable_timestamp(struct timeval tv, char *buffer, const int format_l
 }
 
 int get_options_request(char *buffer, const char *proxy, measurement_t *measurement) {
-    gettimeofday(&measurement->sendtime, NULL);
+    clock_gettime(CLOCK_REALTIME, &measurement->sendtime);
     char read_time [100];
     get_printable_timestamp(measurement->sendtime, read_time, 1, sizeof(read_time));
     snprintf(buffer, 1024,
@@ -203,7 +211,7 @@ int main(int argc, char *argv[]) {
         write(sockfd, buffer, strlen(buffer)); 
         memset(&buffer, 0x00, sizeof(buffer)); 
         read(sockfd, buffer, sizeof(buffer));
-        gettimeofday(&measurement[i].recvtime, NULL);
+        clock_gettime(CLOCK_REALTIME, &measurement[i].recvtime);
         validate_sip_answer(&measurement[i], buffer); 
         calculate_delay(&measurement[i]); 
         usleep(500000);
@@ -243,8 +251,6 @@ int main(int argc, char *argv[]) {
 
             strncat(x_header, sum_buffer, sizeof(x_header)-strlen(x_header));
         }
-
-        printf("Len x-header: %ld\n", strlen(x_header));
         snprintf(summary_message, sizeof(summary_message), 
         "OPTIONS sip:%s SIP/2.0\r\n"
         "Via: SIP/2.0/TCP 192.168.178.62:5060;branch=z9hG4bK776asdhds\r\n"

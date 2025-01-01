@@ -2,6 +2,7 @@
 .vscode
 build
 response_analyser.c
+time_analyzer.c
 
 # Prerequisites
 *.d
