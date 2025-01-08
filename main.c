@@ -7,16 +7,35 @@
 #include <time.h>
 #include <sys/time.h>
 
+const long TRANSLATE_FACTOR = 1000000000L;
+
 typedef struct {
     int request_number;
     struct timespec sendtime;
     struct timespec recvtime;
-    char delay[64];
+    long total_delay;
     char sip_response[248]
 } measurement_t;
 
-void evaluate_total_rtt(measurement_t *measurement, char *min, char *max, char *avg) {
+void evaluate_total_rtt(measurement_t *measurement, char *min, char *max, char *avg, int sender_count) {
+    long temp_min = measurement[0].total_delay;
+    long temp_max = 0;
+    long total = 0; 
+    for (int i = 0; i < sender_count; i++) {
+        if (measurement[i].total_delay < temp_min) {
+            temp_min = measurement[i].total_delay;
+        }
+        if (measurement[i].total_delay > temp_max) {
+            temp_max = measurement[i].total_delay;
+        }
+        total += measurement[i].total_delay;
+    }
+    long temp_avg = total / sender_count;
 
+    snprintf(min, 64, "%ld.%03ld", temp_min / TRANSLATE_FACTOR, temp_min % TRANSLATE_FACTOR);
+    snprintf(max, 64, "%ld.%03ld", temp_max / TRANSLATE_FACTOR, temp_max % TRANSLATE_FACTOR);
+    snprintf(avg, 64, "%ld.%03ld", temp_avg / TRANSLATE_FACTOR, temp_avg % TRANSLATE_FACTOR);
+    
 }
 
 void validate_sip_answer(measurement_t *measurement, char *buffer) {
@@ -39,7 +58,7 @@ void calculate_delay(measurement_t *measurement){
         seconds -= 1; 
         nanosec += 1000000000;
     }
-    snprintf(measurement->delay, sizeof(measurement->delay), "%ld.%06ld", seconds, nanosec/1000);
+    measurement->total_delay = seconds * TRANSLATE_FACTOR + nanosec;
 
 }
 
@@ -221,7 +240,7 @@ int main(int argc, char *argv[]) {
     char max[64];
     char avg[64];
     int sum_row_count; 
-    evaluate_total_rtt(measurement, min, max, avg); 
+    evaluate_total_rtt(measurement, min, max, avg, sender_count); 
 
     if (send_summary == 1) {
         if (sender_count > 10) {
@@ -230,8 +249,8 @@ int main(int argc, char *argv[]) {
             sum_row_count = sender_count;
         }
 
-        char summary_message[3096];
-        char x_header[2048];
+        char summary_message[2048];
+        char x_header[1024];
 
         for (int i = 0; i < sum_row_count; i++) {
             char sum_buffer[640];
@@ -242,11 +261,12 @@ int main(int argc, char *argv[]) {
             get_printable_timestamp(measurement[i].recvtime, recv_time, 0, sizeof(recv_time)); 
 
             snprintf(sum_buffer, sizeof(sum_buffer), 
-            "X-Sum: Pkt %d / Send: %s / Recv: %s / Delay: %s / Resp: %s\r\n", 
+            "X-Sum: Pkt %d / Send: %s / Recv: %s / Delay: %ld.%03ld / Resp: %s\r\n", 
             measurement[i].request_number, 
             send_time, 
             recv_time,
-            measurement[i].delay, 
+            measurement[i].total_delay / TRANSLATE_FACTOR,
+            measurement[i].total_delay % TRANSLATE_FACTOR, 
             measurement[i].sip_response);
 
             strncat(x_header, sum_buffer, sizeof(x_header)-strlen(x_header));
@@ -265,12 +285,14 @@ int main(int argc, char *argv[]) {
         "%s"
         "Content-Length: 0\r\n\r\n",
         destination_ip, destination_ip, destination_ip, min, max, avg, x_header);
-        
-        printf("%s", summary_message);
-        printf("Len Sum-Message: %ld\n", strlen(summary_message));
+
+        write(sockfd, summary_message, strlen(summary_message)); 
     }
 
-    
+    printf("Finished sending\n"); 
+    shutdown(sockfd, SHUT_RDWR);
+    close(sockfd); 
+
     printf("\nSummary:\n"); 
     printf("Tested Proxy: %s\tPakets send: %d\n", destination_ip, sender_count);
     for (int i = 0; i < sender_count; i++) {
@@ -279,11 +301,12 @@ int main(int argc, char *argv[]) {
         get_printable_timestamp(measurement[i].sendtime, send_time, 0, sizeof(send_time));
         get_printable_timestamp(measurement[i].recvtime, recv_time, 0, sizeof(recv_time)); 
 
-        printf("Paket-Nr: %d\tSend: %s\tRecv: %s\tDelay: %s\tAnswer: %s\n", 
+        printf("Paket-Nr: %d\tSend: %s\tRecv: %s\tDelay: %ld.%03ld\tAnswer: %s\n", 
         measurement[i].request_number,
         send_time, 
         recv_time, 
-        measurement[i].delay, 
+        measurement[i].total_delay / TRANSLATE_FACTOR,
+        measurement[i].total_delay % TRANSLATE_FACTOR, 
         measurement[i].sip_response);
     }
     printf("===============================================================\n");
