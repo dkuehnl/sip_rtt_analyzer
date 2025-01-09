@@ -135,8 +135,6 @@ void print_help() {
     printf("                          Becareful: unit is mikroseconds\n");
     printf(" *-d,                     Destination ip-address of sip-proxy (format: xxx.xxx.xxx.xxx)\n");
     printf("  -p,                     Destination port for the requests (default: 5060)\n");
-    printf("  -e,                     Export of summary as .txt-file.\n");
-    printf("                          Default-Filepath: home-directory of the current user.\n");
     printf("  --send-summary[=true]   If set to 'true' the summary will be sent as a separate OPTION-Request\n"); 
     printf("                          to the proxy. Every requests has it's own X-Header with varios information.\n"); 
     printf("                          Only the first ten pakets will be send. For more information see the man-page.\n");
@@ -152,9 +150,8 @@ int main(int argc, char *argv[]) {
     int sender_count = 5; 
     char *destination_ip = NULL;
     char *destination_port = "5060";
-    char *export_filepath = NULL; 
     int send_summary = 0; 
-    int sleep_timer = 500000;
+    unsigned int sleep_timer = 500000;
 
     static struct option long_opts[] = {
         {"send-summary", required_argument, 0, 'a'},
@@ -174,9 +171,6 @@ int main(int argc, char *argv[]) {
             case 'p': 
                 destination_port = optarg; 
                 break;
-            case 'e': 
-                printf("Export not implemented yet. Try again later.\n"); 
-                break; 
             case 's': 
                 sleep_timer = atoi(optarg); 
                 break;
