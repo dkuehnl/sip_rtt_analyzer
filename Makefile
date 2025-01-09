@@ -1,5 +1,5 @@
 CC =gcc
-CFLAGS = -Wall -Wextra -02 -mtune=native
+CFLAGS = -Wall -Wextra -O2 -mtune=native
 TARGET = siprta
 SRC = main.c
 INSTALL_DIR = /usr/bin
@@ -9,13 +9,13 @@ all: build install clean
 build: $(TARGET)
 
 $(TARGET): $(SRC:.c=.o)
-    $(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^
 
 %.o: %.c
-    $(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 install: $(TARGET)
-    cp $(TARGET) $(INSTALL_DIR)
+	cp $(TARGET) $(INSTALL_DIR)
 
 clean: 
-    rm -f $(TARGET) $(SRC:.c=.o)
+	rm -f $(TARGET) $(SRC:.c=.o)

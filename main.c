@@ -14,7 +14,7 @@ typedef struct {
     struct timespec sendtime;
     struct timespec recvtime;
     long total_delay;
-    char sip_response[248]
+    char sip_response[248];
 } measurement_t;
 
 void evaluate_total_rtt(measurement_t *measurement, char *min, char *max, char *avg, int sender_count) {
