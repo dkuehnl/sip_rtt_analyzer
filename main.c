@@ -126,17 +126,37 @@ int get_options_request(char *buffer, const char *proxy, measurement_t *measurem
     }
 }
 
+void print_help() {
+    printf("Usage: sip_rtt_analyzer [OPTION][VALUE]...\n");
+    printf("Measuring the time between sending an SIP-OPTION requests and receiving the corresponding response.\n\n");
+    printf("Mandatory-Arguments are labled with *\n");
+    printf("  -c,                     Number of requests to be sent (default: 5)\n");
+    printf("  -s,                     Set the sleep-timer between every paket (default: 500ms)\n");
+    printf("                          Becareful: unit is mikroseconds\n");
+    printf(" *-d,                     Destination ip-address of sip-proxy (format: xxx.xxx.xxx.xxx)\n");
+    printf("  -p,                     Destination port for the requests (default: 5060)\n");
+    printf("  --send-summary[=true]   If set to 'true' the summary will be sent as a separate OPTION-Request\n"); 
+    printf("                          to the proxy. Every requests has it's own X-Header with varios information.\n"); 
+    printf("                          Only the first ten pakets will be send. For more information see the man-page.\n");
+    printf("                          Default-value: false\n");
+    printf("  --version               Show version\n"); 
+    printf("  --help                  Show help\n\n"); 
+    printf("Attention: there is no explicit implemented security-mechanism to protect the sip-proxy.\n");
+    printf("The user have the full responsibility to not overload the sip-proxy.\n");
+}
+
 int main(int argc, char *argv[]) {
     int opt; 
     int sender_count = 5; 
     char *destination_ip = NULL;
     char *destination_port = "5060";
-    char *export_filepath = NULL; 
     int send_summary = 0; 
+    unsigned int sleep_timer = 500000;
 
     static struct option long_opts[] = {
-        {"send-summary", required_argument, 0, 's'},
+        {"send-summary", required_argument, 0, 'a'},
         {"help", no_argument, 0, 'h'},
+        {"version", no_argument, 0, 'v'},
         {0, 0, 0, 0}
     };
 
@@ -151,10 +171,10 @@ int main(int argc, char *argv[]) {
             case 'p': 
                 destination_port = optarg; 
                 break;
-            case 'e': 
-                printf("Export not implemented yet. Try again later.\n"); 
-                break; 
             case 's': 
+                sleep_timer = atoi(optarg); 
+                break;
+            case 'a': 
                 if (strcmp(optarg, "true") == 0) {
                     send_summary = 1; 
                 } else if (strcmp(optarg, "True") == 0) {
@@ -169,10 +189,13 @@ int main(int argc, char *argv[]) {
                 }
                 break; 
             case 'h': 
-                printf("Help-page work in progress\n"); 
-                break;
+                print_help();
+                exit(EXIT_SUCCESS);  
+            case 'v': 
+                printf("Version: 1.0.1\n"); 
+                exit(EXIT_SUCCESS);
             default: 
-                printf("Man-Page work in progress\n"); 
+                fprintf(stderr, "Error: Unknown argument. Use --help for more information.\n");
                 exit(EXIT_FAILURE);
         }
     }
@@ -185,6 +208,18 @@ int main(int argc, char *argv[]) {
     if (send_summary && sender_count > 10) {
         printf("Warning: To avoid too large OPTION-Requests the summary-message is limited to a maximum of 10 summary-rows - \n"
         "you can still send more than 10 requests.\n");
+        if (sleep_timer < 500000) {
+            char answer;
+            printf("Attention: You're trying to send a high amount of requests (>10) in a very short time.\n"); 
+            printf("Please make sure you know what you do and the tested proxy is able to handle this.\n"); 
+            printf("If something get wrong, you're alone responsible.\n"); 
+            printf("Continue? (y/n) "); 
+            scanf("%c", &answer);
+            if (answer != 'y') {
+                printf("Aborted\n"); 
+                exit(EXIT_FAILURE); 
+            }
+        }
     }
 
     measurement_t *measurement = malloc(sender_count * sizeof(measurement_t));
@@ -233,7 +268,7 @@ int main(int argc, char *argv[]) {
         clock_gettime(CLOCK_REALTIME, &measurement[i].recvtime);
         validate_sip_answer(&measurement[i], buffer); 
         calculate_delay(&measurement[i]); 
-        usleep(500000);
+        usleep(sleep_timer);
     }
 
     char min[64]; 
@@ -289,7 +324,7 @@ int main(int argc, char *argv[]) {
         write(sockfd, summary_message, strlen(summary_message)); 
     }
 
-    printf("Finished sending\n"); 
+    printf("\nFinished sending\n"); 
     shutdown(sockfd, SHUT_RDWR);
     close(sockfd); 
 

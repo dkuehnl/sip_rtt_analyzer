@@ -4,6 +4,8 @@ build
 response_analyser.c
 time_analyzer.c
 min_max_sorting.c
+helppage.c
+sip_rtt_analyzer*
 
 # Prerequisites
 *.d
