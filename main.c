@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <time.h>
 #include <sys/time.h>
+#include <stdbool.h>
 
 const long TRANSLATE_FACTOR = 1000000000L;
 
@@ -127,10 +128,11 @@ int get_options_request(char *buffer, const char *proxy, measurement_t *measurem
 }
 
 void print_help() {
-    printf("Usage: sip_rtt_analyzer [OPTION][VALUE]...\n");
+    printf("Usage: siprta -d [IP-Addr] [OPTION][VALUE]...\n");
     printf("Measuring the time between sending an SIP-OPTION requests and receiving the corresponding response.\n\n");
     printf("Mandatory-Arguments are labled with *\n");
     printf("  -c,                     Number of requests to be sent (default: 5)\n");
+    printf("  -u,                     Activates UDP (default: TCP)\n");
     printf("  -s,                     Set the sleep-timer between every paket (default: 500ms)\n");
     printf("                          Becareful: unit is mikroseconds\n");
     printf(" *-d,                     Destination ip-address of sip-proxy (format: xxx.xxx.xxx.xxx)\n");
@@ -152,6 +154,8 @@ int main(int argc, char *argv[]) {
     char *destination_port = "5060";
     int send_summary = 0; 
     unsigned int sleep_timer = 500000;
+    bool use_udp = false; 
+
 
     static struct option long_opts[] = {
         {"send-summary", required_argument, 0, 'a'},
@@ -160,7 +164,7 @@ int main(int argc, char *argv[]) {
         {0, 0, 0, 0}
     };
 
-    while ((opt = getopt_long(argc, argv, "c:d:p:e:s:", long_opts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:d:p:e:s:u:", long_opts, NULL)) != -1) {
         switch (opt) {
             case 'c': 
                 sender_count = atoi(optarg); 
@@ -173,6 +177,9 @@ int main(int argc, char *argv[]) {
                 break;
             case 's': 
                 sleep_timer = atoi(optarg); 
+                break;
+            case 'u': 
+                use_udp = true; 
                 break;
             case 'a': 
                 if (strcmp(optarg, "true") == 0) {
@@ -232,21 +239,35 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in  sockaddr;
     char                buffer[1024];
 
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd == -1) {
-        fprintf(stderr, "Socketcreation failed.\n"); 
-        exit(EXIT_FAILURE); 
-    }
+    if (!use_udp) {
+        sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        if (sockfd == -1) {
+            fprintf(stderr, "Socketcreation failed.\n"); 
+            exit(EXIT_FAILURE); 
+        }
 
-    memset(&sockaddr, 0x00, sizeof(sockaddr));
-    sockaddr.sin_family = AF_INET; 
-    sockaddr.sin_addr.s_addr = inet_addr(destination_ip); 
-    sockaddr.sin_port = htons(atoi(destination_port));
+        memset(&sockaddr, 0x00, sizeof(sockaddr));
+        sockaddr.sin_family = AF_INET; 
+        sockaddr.sin_addr.s_addr = inet_addr(destination_ip); 
+        sockaddr.sin_port = htons(atoi(destination_port));
 
-    if (connect(sockfd, (struct sockaddr*)&sockaddr, sizeof(sockaddr)) !=0) {
-        fprintf(stderr, "Connect to remote-destination failed.\n"); 
-        close(sockfd); 
-        exit(EXIT_FAILURE);
+        if (connect(sockfd, (struct sockaddr*)&sockaddr, sizeof(sockaddr)) !=0) {
+            fprintf(stderr, "Connect to remote-destination failed.\n"); 
+            close(sockfd); 
+            exit(EXIT_FAILURE);
+        }
+    } else {
+        if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+            fprintf(stderr, "Creating socket failed\n"); 
+            exit(EXIT_FAILURE);
+        }
+
+        memset(&sockaddr, 0x00, sizeof(sockaddr));
+        sockaddr.sin_family = AF_INET; 
+        sockaddr.sin_addr.s_addr = inet_addr(destination_ip);
+        sockaddr.sin_port = htons(destination_port);
+
+        if (bind(sockfd))
     }
 
     printf("Start measurement (%d request will be send)\n", sender_count);
