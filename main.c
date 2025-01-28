@@ -6,6 +6,8 @@
 #include <arpa/inet.h>
 #include <time.h>
 #include <sys/time.h>
+#include <stdbool.h>
+#include <errno.h>
 
 const long TRANSLATE_FACTOR = 1000000000L;
 
@@ -14,7 +16,7 @@ typedef struct {
     struct timespec sendtime;
     struct timespec recvtime;
     long total_delay;
-    char sip_response[248]
+    char sip_response[248];
 } measurement_t;
 
 void evaluate_total_rtt(measurement_t *measurement, char *min, char *max, char *avg, int sender_count) {
@@ -100,23 +102,29 @@ void get_printable_timestamp(struct timespec ts, char *buffer, const int format_
     }
 }
 
-int get_options_request(char *buffer, const char *proxy, measurement_t *measurement) {
+int get_options_request(char *buffer, const char *proxy, const bool use_udp, measurement_t *measurement) {
     clock_gettime(CLOCK_REALTIME, &measurement->sendtime);
     char read_time [100];
     get_printable_timestamp(measurement->sendtime, read_time, 1, sizeof(read_time));
     snprintf(buffer, 1024,
     "OPTIONS sip:%s SIP/2.0\r\n"
-    "Via: SIP/2.0/TCP 192.168.178.62:5060;branch=z9hG4bK776asdhds\r\n"
+    "Via: SIP/2.0/%s 192.168.178.62:5060;branch=z9hG4bK776asdhds\r\n"
     "Max-Forwards: 70\r\n"
     "From: <sip:%s>;tag=djaiefkla348afikju3u9dkhjk3\r\n"
     "To: <sip:%s>\r\n"
     "Call-ID: jfklajbspdkivha@192.168.178.62\r\n"
     "CSeq: 10%d OPTIONS\r\n"
-    "Contact: <sip:+4919952000234234@192.168.178.62:5060;transport=tcp>\r\n"
+    "Contact: <sip:+4919952000234234@192.168.178.62:5060;transport=%s>\r\n"
     "User-Agent: SIP RTT-Tester by dkuehnlein\r\n"
     "X-Timestamp: %s\r\n"
     "Content-Length: 0\r\n\r\n",
-    proxy, proxy, proxy, measurement->request_number, read_time
+    proxy,
+    use_udp == true ? "UDP" : "TCP",
+    proxy, 
+    proxy, 
+    measurement->request_number, 
+    use_udp == true ? "udp" : "tcp",
+    read_time
     );
 
     if (strlen(buffer) > 0) {
@@ -127,13 +135,14 @@ int get_options_request(char *buffer, const char *proxy, measurement_t *measurem
 }
 
 void print_help() {
-    printf("Usage: sip_rtt_analyzer [OPTION][VALUE]...\n");
+    printf("Usage: siprta -d [IP-Addr] [OPTION][VALUE]...\n");
     printf("Measuring the time between sending an SIP-OPTION requests and receiving the corresponding response.\n\n");
     printf("Mandatory-Arguments are labled with *\n");
     printf("  -c,                     Number of requests to be sent (default: 5)\n");
+    printf("  -u,                     Activates UDP (default: TCP)\n");
     printf("  -s,                     Set the sleep-timer between every paket (default: 500ms)\n");
     printf("                          Becareful: unit is mikroseconds\n");
-    printf(" *-d,                     Destination ip-address of sip-proxy (format: xxx.xxx.xxx.xxx)\n");
+    printf(" *-d,                     Destination IP-address of SIP-proxy (format: xxx.xxx.xxx.xxx)\n");
     printf("  -p,                     Destination port for the requests (default: 5060)\n");
     printf("  --send-summary[=true]   If set to 'true' the summary will be sent as a separate OPTION-Request\n"); 
     printf("                          to the proxy. Every requests has it's own X-Header with varios information.\n"); 
@@ -141,8 +150,8 @@ void print_help() {
     printf("                          Default-value: false\n");
     printf("  --version               Show version\n"); 
     printf("  --help                  Show help\n\n"); 
-    printf("Attention: there is no explicit implemented security-mechanism to protect the sip-proxy.\n");
-    printf("The user have the full responsibility to not overload the sip-proxy.\n");
+    printf("Attention: there is no explicit implemented security-mechanism to protect the SIP-proxy.\n");
+    printf("The user have the full responsibility to not overload the SIP-proxy.\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -152,6 +161,7 @@ int main(int argc, char *argv[]) {
     char *destination_port = "5060";
     int send_summary = 0; 
     unsigned int sleep_timer = 500000;
+    bool use_udp = false; 
 
     static struct option long_opts[] = {
         {"send-summary", required_argument, 0, 'a'},
@@ -160,7 +170,7 @@ int main(int argc, char *argv[]) {
         {0, 0, 0, 0}
     };
 
-    while ((opt = getopt_long(argc, argv, "c:d:p:e:s:", long_opts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:d:p:e:s:u", long_opts, NULL)) != -1) {
         switch (opt) {
             case 'c': 
                 sender_count = atoi(optarg); 
@@ -173,6 +183,9 @@ int main(int argc, char *argv[]) {
                 break;
             case 's': 
                 sleep_timer = atoi(optarg); 
+                break;
+            case 'u': 
+                use_udp = true; 
                 break;
             case 'a': 
                 if (strcmp(optarg, "true") == 0) {
@@ -232,16 +245,29 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in  sockaddr;
     char                buffer[1024];
 
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd == -1) {
-        fprintf(stderr, "Socketcreation failed.\n"); 
-        exit(EXIT_FAILURE); 
+    if (use_udp) {
+        if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+            fprintf(stderr, "Creating socket failed\n"); 
+            exit(EXIT_FAILURE);
+        }
+        struct timeval timeout = {2, 0};
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)); 
+    } else {
+        sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        if (sockfd == -1) {
+            fprintf(stderr, "Socketcreation failed.\n"); 
+            exit(EXIT_FAILURE); 
+        }
     }
 
     memset(&sockaddr, 0x00, sizeof(sockaddr));
     sockaddr.sin_family = AF_INET; 
     sockaddr.sin_addr.s_addr = inet_addr(destination_ip); 
     sockaddr.sin_port = htons(atoi(destination_port));
+    if(sockaddr.sin_addr.s_addr == INADDR_NONE) {
+        fprintf(stderr, "Invalid IP-Adress\n"); 
+        exit(EXIT_FAILURE);
+    }
 
     if (connect(sockfd, (struct sockaddr*)&sockaddr, sizeof(sockaddr)) !=0) {
         fprintf(stderr, "Connect to remote-destination failed.\n"); 
@@ -255,16 +281,42 @@ int main(int argc, char *argv[]) {
         print_progress_bar(i+1, sender_count);
         measurement[i].request_number = i+1;
 
-        if (get_options_request(buffer, destination_ip, &measurement[i]) != 0) {
+        if (get_options_request(buffer, destination_ip, use_udp, &measurement[i]) != 0) {
             fprintf(stderr, "Error while creating OPTIONS-Request occured.\n"); 
             snprintf(measurement[i].sip_response, sizeof(measurement[i].sip_response), "Error");
             shutdown(sockfd, SHUT_RDWR);
             close(sockfd); 
             exit(EXIT_FAILURE);
         }
-        write(sockfd, buffer, strlen(buffer)); 
+
+        ssize_t bytes_sent = write(sockfd, buffer, strlen(buffer)); 
+        if (bytes_sent < 0) {
+            fprintf(stderr, "Error while writing to destination\n"); 
+            shutdown(sockfd, SHUT_RDWR);
+            close(sockfd); 
+            exit(EXIT_FAILURE);
+        }
+
         memset(&buffer, 0x00, sizeof(buffer)); 
-        read(sockfd, buffer, sizeof(buffer));
+        ssize_t bytes_recv = read(sockfd, buffer, sizeof(buffer)-1);
+        if (bytes_recv < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                fprintf(stderr, "\nUDP-Timeout"); 
+                snprintf(measurement[i].sip_response, sizeof(measurement[i].sip_response), "Recv-Timeout"); 
+            } else {
+                fprintf(stderr, "Error while reading from socket\n"); 
+                shutdown(sockfd, SHUT_RDWR);
+                close(sockfd); 
+                break;
+            }
+            continue; 
+        } else if (bytes_recv == 0) {
+            fprintf(stderr, "Connection closed by peer\n"); 
+            shutdown(sockfd, SHUT_RDWR); 
+            close(sockfd); 
+            break;
+        }
+
         clock_gettime(CLOCK_REALTIME, &measurement[i].recvtime);
         validate_sip_answer(&measurement[i], buffer); 
         calculate_delay(&measurement[i]); 
@@ -308,18 +360,24 @@ int main(int argc, char *argv[]) {
         }
         snprintf(summary_message, sizeof(summary_message), 
         "OPTIONS sip:%s SIP/2.0\r\n"
-        "Via: SIP/2.0/TCP 192.168.178.62:5060;branch=z9hG4bK776asdhds\r\n"
+        "Via: SIP/2.0/%s 192.168.178.62:5060;branch=z9hG4bK776asdhds\r\n"
         "Max-Forwards: 70\r\n"
         "From: <sip:%s>;tag=djaiefkla348afikju3u9dkhjk3\r\n"
         "To: <sip:%s>\r\n"
         "Call-ID: jfklajbspdkivha@192.168.178.62\r\n"
         "CSeq: 200 OPTIONS\r\n"
-        "Contact: <sip:+4919952000234234@192.168.178.62:5060;transport=tcp>\r\n"
+        "Contact: <sip:+4919952000234234@192.168.178.62:5060;transport=%s>\r\n"
         "User-Agent: SIP RTT-Tester by dkuehnlein\r\n"
         "X-Total: Min-Delay: %s / Max-Delay: %s / Avg-Delay: %s\r\n"
         "%s"
         "Content-Length: 0\r\n\r\n",
-        destination_ip, destination_ip, destination_ip, min, max, avg, x_header);
+        destination_ip, 
+        use_udp == true ? "UDP" : "TCP",
+        destination_ip, 
+        destination_ip, 
+        use_udp == true ? "udp" : "tcp",
+        min, max, avg, 
+        x_header);
 
         write(sockfd, summary_message, strlen(summary_message)); 
     }
